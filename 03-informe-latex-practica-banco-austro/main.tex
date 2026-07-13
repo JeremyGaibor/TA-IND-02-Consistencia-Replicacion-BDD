@@ -1,0 +1,862 @@
+\documentclass[11pt,a4paper]{article}
+
+% ===================== IDIOMA Y CODIFICACIÓN =====================
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+
+% ===================== REQUISITO TRANSVERSAL DE CALIDAD =====================
+\usepackage{booktabs}                 % tablas
+\usepackage{listings}                 % código
+\usepackage{graphicx}                 % figuras
+\usepackage{amsmath}                  % ecuaciones
+\usepackage{hyperref}                 % hipervínculos
+
+% ===================== OTROS PAQUETES DE APOYO =====================
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+\usepackage{xcolor}
+\usepackage{caption}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{multirow}
+
+% ---------------------- Colores para listados ----------------------
+\definecolor{codebg}{RGB}{245,245,245}
+\definecolor{codegray}{RGB}{110,110,110}
+\definecolor{codegreen}{RGB}{0,128,0}
+\definecolor{codeblue}{RGB}{30,80,180}
+\definecolor{codered}{RGB}{170,30,30}
+
+% ---------------------- Estilo base para listados ----------------------
+\lstdefinestyle{base}{
+    backgroundcolor=\color{codebg},
+    basicstyle=\ttfamily\small,
+    commentstyle=\color{codegray}\itshape,
+    keywordstyle=\color{codeblue}\bfseries,
+    stringstyle=\color{codered},
+    numberstyle=\tiny\color{codegray},
+    numbers=left,
+    numbersep=6pt,
+    frame=single,
+    rulecolor=\color{black!30},
+    breaklines=true,
+    breakatwhitespace=false,
+    showstringspaces=false,
+    tabsize=2,
+    captionpos=b,
+    xleftmargin=1.5em,
+    framexleftmargin=1.5em
+}
+
+\lstdefinelanguage{yaml}{
+    keywords={true,false,null,y,n},
+    keywordstyle=\color{codeblue}\bfseries,
+    sensitive=false,
+    comment=[l]{\#},
+    morestring=[b]',
+    morestring=[b]"
+}
+
+\lstdefinestyle{bash}{style=base,language=bash}
+\lstdefinestyle{yaml}{style=base,language=yaml}
+\lstdefinestyle{sql}{style=base,language=SQL}
+\lstdefinestyle{java}{style=base,language=Java}
+\lstdefinestyle{json}{style=base}
+
+\lstset{style=base}
+
+% ---------------------- Encabezado y pie de página ----------------------
+\setlength{\headheight}{14pt}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{Práctica de Bases de Datos Distribuidas}
+\fancyhead[R]{Caso Banco del Austro}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=codeblue,
+    urlcolor=codeblue,
+    citecolor=codeblue,
+    pdftitle={Práctica de Bases de Datos Distribuidas - Caso Banco del Austro},
+    pdfauthor={Jeremy Ruperto Gaibor Rodríguez}
+}
+
+% ---------------------- Comando corto para rutas de imágenes ----------------------
+\graphicspath{{imagenes/}}
+
+\newcommand{\figuraGuia}[3]{%
+    \begin{figure}[htbp]
+        \centering
+        \includegraphics[width=#3\textwidth]{#1}
+        \caption{#2}
+        \label{fig:#1}
+    \end{figure}
+}
+
+\title{\textbf{Práctica de Bases de Datos Distribuidas}\\[0.3cm]
+\large Caso Banco del Austro: guía paso a paso desde cero}
+\author{Jeremy Ruperto Gaibor Rodríguez}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\noindent Este documento describe, paso a paso, la implementación de un escenario de \textbf{fragmentación horizontal} sobre dos motores PostgreSQL independientes (nodo Cuenca y nodo Quito), orquestados con Docker, y consultados de forma unificada mediante una aplicación Spring Boot que enruta las peticiones según el prefijo del número de cuenta. Se documenta también una prueba de tolerancia a fallos que evidencia el comportamiento del sistema cuando uno de los nodos deja de estar disponible.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% ======================================================================
+\section{Verificación rápida del ambiente}
+% ======================================================================
+
+Antes de continuar, abra \texttt{cmd.exe} y ejecute los siguientes comandos, uno por uno. Cada uno debe imprimir una versión; si alguno responde que \texttt{'xxx' no se reconoce como un comando}, entonces el programa correspondiente no está instalado o falta agregar su carpeta al \texttt{PATH}.
+
+\begin{lstlisting}[style=bash,caption={Comandos de verificación del entorno}]
+docker --version
+docker compose version
+java -version
+mvn -version
+\end{lstlisting}
+
+\figuraGuia{ilustracion01}{Verificación del ambiente en \texttt{cmd.exe}}{0.85}
+
+% ======================================================================
+\section{Crear la estructura de carpetas del proyecto}
+% ======================================================================
+
+Antes de tocar Docker o IntelliJ, se prepara la carpeta donde van a vivir todos los archivos de esta práctica: los scripts SQL, el \texttt{docker-compose.yml} y luego el proyecto Java.
+
+\subsection{Crear las carpetas desde \texttt{cmd.exe}}
+
+\begin{lstlisting}[style=bash,caption={Creación de la estructura de carpetas}]
+mkdir C:\uteq
+mkdir C:\uteq\banco-austro
+cd C:\uteq\banco-austro
+mkdir sql-cuenca
+mkdir sql-quito
+\end{lstlisting}
+
+\figuraGuia{ilustracion02}{Creación de la raíz y las dos subcarpetas de scripts SQL}{0.85}
+
+\subsection{Estructura esperada}
+
+Al finalizar esta sección, la carpeta debe verse así:
+
+\begin{lstlisting}[style=bash,caption={Verificación de la estructura inicial}]
+cd C:\uteq\banco-austro
+dir
+\end{lstlisting}
+
+\figuraGuia{ilustracion03}{Estructura inicial del proyecto}{0.85}
+
+% ======================================================================
+\section{Levantar los motores PostgreSQL con Docker}
+% ======================================================================
+
+\subsection{Crear el archivo \texttt{docker-compose.yml}}
+
+Abra VS Code. Vaya al menú \textbf{File $\rightarrow$ Open Folder...} y seleccione \texttt{C:\textbackslash uteq\textbackslash banco-austro}. En el panel izquierdo (\emph{Explorer}) deben aparecer las dos subcarpetas \texttt{sql-cuenca} y \texttt{sql-quito}. Pulse el botón de nuevo archivo (\emph{New File}), llame al archivo exactamente \texttt{docker-compose.yml} y pulse \texttt{Enter}.
+
+Copie el siguiente contenido exactamente, respetando los espacios (dos espacios por nivel de indentación) y sin usar tabuladores.
+
+\begin{lstlisting}[style=yaml,caption={\texttt{docker-compose.yml} con los dos nodos PostgreSQL}]
+services:
+
+  db-cuenca:
+    image: postgres:16-alpine
+    container_name: banco-cuenca
+    environment:
+      POSTGRES_DB: banco_cuenca
+      POSTGRES_USER: banco
+      POSTGRES_PASSWORD: banco123
+    ports:
+      - "5432:5432"
+    volumes:
+      - vol-cuenca:/var/lib/postgresql/data
+      - ./sql-cuenca:/docker-entrypoint-initdb.d
+    networks:
+      - bda-net
+
+  db-quito:
+    image: postgres:16-alpine
+    container_name: banco-quito
+    environment:
+      POSTGRES_DB: banco_quito
+      POSTGRES_USER: banco
+      POSTGRES_PASSWORD: banco123
+    ports:
+      - "5433:5432"
+    volumes:
+      - vol-quito:/var/lib/postgresql/data
+      - ./sql-quito:/docker-entrypoint-initdb.d
+    networks:
+      - bda-net
+
+networks:
+  bda-net:
+    driver: bridge
+
+volumes:
+  vol-cuenca:
+  vol-quito:
+\end{lstlisting}
+
+\figuraGuia{ilustracion04}{\texttt{C:\textbackslash uteq\textbackslash banco-austro\textbackslash docker-compose.yml}}{0.85}
+
+% ======================================================================
+\section{Crear las tablas y datos de prueba}
+% ======================================================================
+
+Este escenario aplica una \textbf{fragmentación horizontal}: cada nodo almacena únicamente las filas cuya oficina coincide con su ubicación. Formalmente, si $R$ es la relación \texttt{cuentas}, los fragmentos se definen como
+
+\begin{align}
+R_{\text{Cuenca}} &= \sigma_{\text{oficina} = \text{'CUENCA'}}(R) \\
+R_{\text{Quito}}  &= \sigma_{\text{oficina} = \text{'QUITO'}}(R)
+\end{align}
+
+de modo que $R = R_{\text{Cuenca}} \cup R_{\text{Quito}}$ y $R_{\text{Cuenca}} \cap R_{\text{Quito}} = \emptyset$.
+
+\subsection{Crear los scripts del nodo Cuenca}
+
+\subsubsection{\texttt{01\_schema.sql} de Cuenca}
+
+En VS Code, con la carpeta \texttt{banco-austro} abierta, haga clic derecho sobre la carpeta \texttt{sql-cuenca} y elija \emph{New File}. Nombre el archivo exactamente \texttt{01\_schema.sql} y presione \texttt{Enter}. Copie el siguiente contenido:
+
+\begin{lstlisting}[style=sql,caption={Esquema del nodo Cuenca}]
+-- Esquema del nodo Cuenca
+-- Fragmento horizontal: filas con oficina = 'CUENCA'
+
+CREATE TABLE IF NOT EXISTS clientes (
+    id BIGSERIAL PRIMARY KEY,
+    cedula VARCHAR(10) UNIQUE NOT NULL,
+    nombre VARCHAR(120) NOT NULL,
+    ciudad VARCHAR(60) NOT NULL,
+    creado_en TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS cuentas (
+    id BIGSERIAL PRIMARY KEY,
+    numero VARCHAR(20) UNIQUE NOT NULL,
+    cliente_id BIGINT NOT NULL REFERENCES clientes(id),
+    saldo NUMERIC(15,2) NOT NULL DEFAULT 0.00 CHECK (saldo >= 0),
+    oficina VARCHAR(20) NOT NULL CHECK (oficina = 'CUENCA'),
+    abierta_en TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS transacciones (
+    id BIGSERIAL PRIMARY KEY,
+    cuenta_orig VARCHAR(20) NOT NULL,
+    cuenta_dest VARCHAR(20) NOT NULL,
+    monto NUMERIC(15,2) NOT NULL CHECK (monto > 0),
+    fecha TIMESTAMP NOT NULL DEFAULT NOW(),
+    estado VARCHAR(20) NOT NULL DEFAULT 'COMPLETADA',
+    oficina VARCHAR(20) NOT NULL CHECK (oficina = 'CUENCA')
+);
+
+CREATE INDEX idx_cuentas_cliente ON cuentas(cliente_id);
+CREATE INDEX idx_transacciones_orig ON transacciones(cuenta_orig);
+CREATE INDEX idx_transacciones_fecha ON transacciones(fecha);
+\end{lstlisting}
+
+\figuraGuia{ilustracion05}{\texttt{sql-cuenca/01\_schema.sql}}{0.85}
+
+\subsubsection{\texttt{02\_datos.sql} de Cuenca}
+
+En la misma carpeta \texttt{sql-cuenca}, cree un nuevo archivo llamado \texttt{02\_datos.sql} y pegue lo siguiente:
+
+\begin{lstlisting}[style=sql,caption={Datos iniciales del nodo Cuenca}]
+-- Datos iniciales del nodo Cuenca
+
+INSERT INTO clientes (cedula, nombre, ciudad) VALUES
+('0101234567', 'Mario Vintimilla', 'Cuenca'),
+('0107654321', 'Sofia Vasquez', 'Cuenca'),
+('0103456789', 'Andres Cordero', 'Cuenca');
+
+INSERT INTO cuentas (numero, cliente_id, saldo, oficina) VALUES
+('2201000001', 1, 15000.00, 'CUENCA'),
+('2201000002', 2, 4200.50, 'CUENCA'),
+('2201000003', 3, 850.75, 'CUENCA');
+
+INSERT INTO transacciones (cuenta_orig, cuenta_dest, monto, oficina) VALUES
+('2201000001', '2201000002', 500.00, 'CUENCA'),
+('2201000002', '2201000003', 120.25, 'CUENCA');
+\end{lstlisting}
+
+\figuraGuia{ilustracion06}{\texttt{sql-cuenca/02\_datos.sql}}{0.85}
+
+\subsection{Crear los scripts del nodo Quito}
+
+De la misma forma, en la carpeta \texttt{sql-quito} cree los archivos \texttt{01\_schema.sql} y \texttt{02\_datos.sql}. El esquema es idéntico al de Cuenca, salvo que las restricciones \texttt{CHECK} referencian a \texttt{'QUITO'}; los datos también son distintos.
+
+\begin{lstlisting}[style=sql,caption={Esquema del nodo Quito (\texttt{01\_schema.sql})}]
+-- Esquema del nodo Quito
+-- Fragmento horizontal: filas con oficina = 'QUITO'
+
+CREATE TABLE IF NOT EXISTS clientes (
+    id BIGSERIAL PRIMARY KEY,
+    cedula VARCHAR(10) UNIQUE NOT NULL,
+    nombre VARCHAR(120) NOT NULL,
+    ciudad VARCHAR(60) NOT NULL,
+    creado_en TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS cuentas (
+    id BIGSERIAL PRIMARY KEY,
+    numero VARCHAR(20) UNIQUE NOT NULL,
+    cliente_id BIGINT NOT NULL REFERENCES clientes(id),
+    saldo NUMERIC(15,2) NOT NULL DEFAULT 0.00 CHECK (saldo >= 0),
+    oficina VARCHAR(20) NOT NULL CHECK (oficina = 'QUITO'),
+    abierta_en TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS transacciones (
+    id BIGSERIAL PRIMARY KEY,
+    cuenta_orig VARCHAR(20) NOT NULL,
+    cuenta_dest VARCHAR(20) NOT NULL,
+    monto NUMERIC(15,2) NOT NULL CHECK (monto > 0),
+    fecha TIMESTAMP NOT NULL DEFAULT NOW(),
+    estado VARCHAR(20) NOT NULL DEFAULT 'COMPLETADA',
+    oficina VARCHAR(20) NOT NULL CHECK (oficina = 'QUITO')
+);
+
+CREATE INDEX idx_cuentas_cliente ON cuentas(cliente_id);
+CREATE INDEX idx_transacciones_orig ON transacciones(cuenta_orig);
+CREATE INDEX idx_transacciones_fecha ON transacciones(fecha);
+\end{lstlisting}
+
+\begin{lstlisting}[style=sql,caption={Datos iniciales del nodo Quito (\texttt{02\_datos.sql})}]
+-- Datos iniciales del nodo Quito
+
+INSERT INTO clientes (cedula, nombre, ciudad) VALUES
+('1701234567', 'Pedro Jimenez', 'Quito'),
+('1709876543', 'Luisa Paredes', 'Quito'),
+('1704567890', 'Carla Espinoza', 'Quito');
+
+INSERT INTO cuentas (numero, cliente_id, saldo, oficina) VALUES
+('1701000001', 1, 8000.00, 'QUITO'),
+('1701000002', 2, 2500.00, 'QUITO'),
+('1701000003', 3, 975.40, 'QUITO');
+
+INSERT INTO transacciones (cuenta_orig, cuenta_dest, monto, oficina) VALUES
+('1701000001', '1701000002', 300.00, 'QUITO'),
+('1701000003', '1701000001', 75.00, 'QUITO');
+\end{lstlisting}
+
+\figuraGuia{ilustracion07}{Scripts del nodo Quito}{0.85}
+
+% ======================================================================
+\section{Levantar los contenedores por primera vez}
+% ======================================================================
+
+\subsection{Asegurarse de que Docker Desktop está corriendo}
+
+Abra Docker Desktop desde el menú de Inicio. Espere a que el ícono en la barra de tareas quede en verde (o a que la ventana muestre \emph{Docker Desktop is running}). Sin Docker Desktop corriendo, todos los comandos siguientes fallan con el error \texttt{error during connect}.
+
+\figuraGuia{ilustracion08}{Docker Desktop en ejecución}{0.85}
+
+\subsection{Ejecutar \texttt{docker compose up}}
+
+En \texttt{cmd.exe}, cambie a la carpeta del proyecto y levante los servicios:
+
+\begin{lstlisting}[style=bash,caption={Levantar los contenedores}]
+cd C:\uteq\banco-austro
+docker compose up -d
+\end{lstlisting}
+
+\figuraGuia{ilustracion09}{Salida de \texttt{docker compose up}}{0.85}
+
+La primera vez, Docker descarga la imagen \texttt{postgres:16-alpine} (unos 250 MB). Espere un mensaje similar a:
+
+\begin{lstlisting}[style=bash,caption={Mensaje esperado tras levantar los servicios}]
+[+] Running 5/5
+ - Network banco-austro_bda-net  Created
+ - Volume "banco-austro_vol-cuenca"  Created
+ - Volume "banco-austro_vol-quito"   Created
+ - Container banco-cuenca            Started
+ - Container banco-quito             Started
+\end{lstlisting}
+
+\subsection{Verificar los contenedores en la línea de comandos}
+
+Todavía en \texttt{cmd.exe}, ejecute:
+
+\begin{lstlisting}[style=bash,caption={Estado de los contenedores}]
+docker compose ps
+\end{lstlisting}
+
+\figuraGuia{ilustracion10}{Contenedores en línea}{0.85}
+
+\subsection{Verificar los logs de inicialización}
+
+Muestre las últimas líneas del log de cada contenedor:
+
+\begin{lstlisting}[style=bash,caption={Consulta de logs de cada nodo}]
+docker logs banco-cuenca --tail 30
+docker logs banco-quito --tail 30
+\end{lstlisting}
+
+\subsection{Verificar los contenedores en Docker Desktop (interfaz gráfica)}
+
+Abra la ventana de Docker Desktop. En el menú lateral izquierdo, seleccione \emph{Containers}. Debe ver un grupo llamado \texttt{banco-austro} con dos entradas: \texttt{banco-cuenca} y \texttt{banco-quito}, ambas con estado \emph{Running} (punto verde).
+
+Haga clic en cualquiera de los dos contenedores y luego en la pestaña \emph{Logs} para inspeccionar visualmente lo mismo que se vio con \texttt{docker logs}. La pestaña \emph{Terminal} le da una shell dentro del contenedor si necesita entrar manualmente.
+
+\figuraGuia{ilustracion11}{Verificación de los contenedores en Docker Desktop}{0.85}
+
+% ======================================================================
+\section{Verificar los datos con pgAdmin (opción gráfica)}
+% ======================================================================
+
+Antes de escribir una sola línea de código Java conviene comprobar, con una herramienta gráfica de bases de datos, que los dos motores contienen exactamente el fragmento que deberían. Se muestran dos alternativas equivalentes: pgAdmin 4 (herramienta dedicada) o el panel \emph{Database} de IntelliJ IDEA (integrado en el IDE).
+
+\subsection{Configurar pgAdmin 4}
+
+\subsubsection{Abrir pgAdmin y crear dos servidores}
+
+Abra pgAdmin 4. Se abrirá en su navegador (\url{http://127.0.0.1:PUERTO}). En el panel izquierdo, haga clic derecho sobre \emph{Servers $\rightarrow$ Register $\rightarrow$ Server...}. Complete la primera conexión con los siguientes datos y pulse \emph{Save}:
+
+\begin{table}[htbp]
+\centering
+\caption{Parámetros de conexión del servidor \emph{Banco Austro Cuenca}}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Pestaña} & \textbf{Campo / valor} \\
+\midrule
+General    & Name: \texttt{Banco Austro Cuenca} \\
+\midrule
+\multirow{5}{*}{Connection}
+           & Host name/address: \texttt{localhost} \\
+           & Port: \texttt{5432} \\
+           & Maintenance database: \texttt{banco\_cuenca} \\
+           & Username: \texttt{banco} \\
+           & Password: \texttt{banco123} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Repita el mismo proceso para el segundo servidor, con nombre \texttt{Banco Austro Quito}, puerto \texttt{5433} y base \texttt{banco\_quito}.
+
+\subsubsection{Navegar hasta las tablas}
+
+En el panel izquierdo, expanda \emph{Servers $\rightarrow$ Banco Austro Cuenca $\rightarrow$ Databases $\rightarrow$ banco\_cuenca $\rightarrow$ Schemas $\rightarrow$ public $\rightarrow$ Tables}. Debe ver tres tablas: \texttt{clientes}, \texttt{cuentas} y \texttt{transacciones}. Repita en el servidor de Quito.
+
+\figuraGuia{ilustracion12}{Navegar hasta las tablas del nodo Cuenca}{0.85}
+\figuraGuia{ilustracion13}{Navegar hasta las tablas del nodo Quito}{0.85}
+
+En pgAdmin, con el servidor de Cuenca seleccionado, abra el editor de consultas: botón \emph{Query Tool} (ícono con un rayo). Escriba y ejecute:
+
+\begin{lstlisting}[style=sql,caption={Consulta de verificación sobre el nodo Cuenca}]
+SELECT c.numero, cl.nombre, c.saldo, c.oficina
+FROM cuentas c
+JOIN clientes cl ON cl.id = c.cliente_id
+ORDER BY c.numero;
+\end{lstlisting}
+
+% ======================================================================
+\section{Crear el proyecto Spring Boot}
+% ======================================================================
+
+\subsection{Generar el proyecto}
+
+Abra IntelliJ IDEA. En la pantalla de bienvenida pulse \emph{New Project}. En el panel izquierdo elija \emph{Spring Boot} (o \emph{Spring Initializr}, según la versión). Complete el asistente con:
+
+\begin{table}[htbp]
+\centering
+\caption{Configuración del proyecto Spring Boot}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Campo} & \textbf{Valor} \\
+\midrule
+Name         & banco-austro \\
+Location     & \texttt{C:\textbackslash uteq\textbackslash banco-austro} \\
+Language     & Java \\
+Type         & Maven \\
+Group        & ec.edu.uteq \\
+Artifact     & banco-austro \\
+Package name & ec.edu.uteq.bancoaustro \\
+JDK          & 21 \\
+Java         & 21 \\
+Packaging    & Jar \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\figuraGuia{ilustracion14}{Configuración del proyecto}{0.85}
+
+\subsection{Elegir Spring Boot y dependencias}
+
+En la siguiente pantalla, seleccione la última versión estable de Spring Boot (3.3.x o 3.4.x) y marque las siguientes dependencias:
+
+\begin{itemize}[nosep]
+    \item \textbf{Spring Web} — para exponer endpoints REST.
+    \item \textbf{JDBC API} — para conectarse a la base con \texttt{JdbcTemplate}.
+    \item \textbf{PostgreSQL Driver} — para que Java hable con PostgreSQL.
+\end{itemize}
+
+\figuraGuia{ilustracion15}{Dependencias seleccionadas}{0.85}
+
+Pulse \emph{Create}. IntelliJ descargará las dependencias de Maven y abrirá el proyecto. Espere a que el indicador de fondo indique que la indexación terminó.
+
+\subsection{Estructura del proyecto que se genera}
+
+\figuraGuia{ilustracion16}{Estructura del proyecto}{0.85}
+
+\subsection{Cambiar \texttt{application.properties} por \texttt{application.yml}}
+
+En el panel de proyecto, expanda \texttt{src/main/resources}. Clic derecho sobre \texttt{application.properties} $\rightarrow$ \emph{Refactor} $\rightarrow$ \emph{Rename} $\rightarrow$ póngale de nombre \texttt{application.yml}. Reemplace su contenido por:
+
+\begin{lstlisting}[style=yaml,caption={\texttt{application.yml}}]
+server:
+  port: 8080
+
+spring:
+  application:
+    name: banco-austro
+
+datasources:
+  cuenca:
+    url: jdbc:postgresql://localhost:5432/banco_cuenca
+    username: banco
+    password: banco123
+    driver-class-name: org.postgresql.Driver
+
+  quito:
+    url: jdbc:postgresql://localhost:5433/banco_quito
+    username: banco
+    password: banco123
+    driver-class-name: org.postgresql.Driver
+\end{lstlisting}
+
+\figuraGuia{ilustracion17}{\texttt{application.yml}}{0.85}
+
+% ======================================================================
+\section{Escribir el código Java de la aplicación}
+% ======================================================================
+
+\subsection{Organizar los paquetes}
+
+Se van a crear tres paquetes dentro de \texttt{ec.edu.uteq.bancoaustro}:
+
+\begin{itemize}[nosep]
+    \item \textbf{config}: contiene la clase que declara los dos \texttt{DataSource}.
+    \item \textbf{service}: contiene la lógica de enrutamiento distribuido.
+    \item \textbf{controller}: contiene los endpoints REST.
+\end{itemize}
+
+\figuraGuia{ilustracion18}{Organización de los paquetes}{0.85}
+
+\subsection{Clase de configuración de los dos \texttt{DataSource}}
+
+\subsubsection{\texttt{DataSourceConfig.java}}
+
+Dentro del paquete \texttt{config}, clic derecho $\rightarrow$ \emph{New} $\rightarrow$ \emph{Java Class} $\rightarrow$ nombre \texttt{DataSourceConfig}. Reemplace el contenido por:
+
+\begin{lstlisting}[style=java,caption={\texttt{DataSourceConfig.java}}]
+package ec.edu.uteq.bancoaustro.config;
+
+import javax.sql.DataSource;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.jdbc.DataSourceBuilder;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class DataSourceConfig {
+
+    @Value("${datasources.cuenca.url}")
+    private String cuencaUrl;
+
+    @Value("${datasources.cuenca.username}")
+    private String cuencaUser;
+
+    @Value("${datasources.cuenca.password}")
+    private String cuencaPass;
+
+    @Value("${datasources.quito.url}")
+    private String quitoUrl;
+
+    @Value("${datasources.quito.username}")
+    private String quitoUser;
+
+    @Value("${datasources.quito.password}")
+    private String quitoPass;
+
+    @Bean(name = "dsCuenca")
+    public DataSource dsCuenca() {
+        return DataSourceBuilder.create()
+                .url(cuencaUrl)
+                .username(cuencaUser)
+                .password(cuencaPass)
+                .driverClassName("org.postgresql.Driver")
+                .build();
+    }
+
+    @Bean(name = "dsQuito")
+    public DataSource dsQuito() {
+        return DataSourceBuilder.create()
+                .url(quitoUrl)
+                .username(quitoUser)
+                .password(quitoPass)
+                .driverClassName("org.postgresql.Driver")
+                .build();
+    }
+}
+\end{lstlisting}
+
+\subsubsection{\texttt{ConsultaDistribuidaService.java}}
+
+En el paquete \texttt{service}, cree la clase \texttt{ConsultaDistribuidaService} con este contenido:
+
+\begin{lstlisting}[style=java,caption={\texttt{ConsultaDistribuidaService.java}}]
+package ec.edu.uteq.bancoaustro.service;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import javax.sql.DataSource;
+
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+
+@Service
+public class ConsultaDistribuidaService {
+
+    private final JdbcTemplate jdbcCuenca;
+    private final JdbcTemplate jdbcQuito;
+
+    public ConsultaDistribuidaService(
+            @Qualifier("dsCuenca") DataSource dsCuenca,
+            @Qualifier("dsQuito") DataSource dsQuito
+    ) {
+        this.jdbcCuenca = new JdbcTemplate(dsCuenca);
+        this.jdbcQuito = new JdbcTemplate(dsQuito);
+    }
+
+    public Map<String, Object> consultarSaldo(String numero) {
+        JdbcTemplate destino = enrutar(numero);
+
+        String sql = "SELECT numero, saldo, oficina FROM cuentas WHERE numero = ?";
+
+        List<Map<String, Object>> filas = destino.queryForList(sql, numero);
+
+        if (filas.isEmpty()) {
+            return Map.of(
+                    "error", "Cuenta no encontrada",
+                    "numero", numero
+            );
+        }
+
+        return filas.get(0);
+    }
+
+    public List<Map<String, Object>> listarTodosLosClientes() {
+        String sql = "SELECT cedula, nombre, ciudad FROM clientes";
+
+        List<Map<String, Object>> union = new ArrayList<>();
+
+        union.addAll(jdbcCuenca.queryForList(sql));
+        union.addAll(jdbcQuito.queryForList(sql));
+
+        return union;
+    }
+
+    private JdbcTemplate enrutar(String numero) {
+        if (numero == null || numero.length() < 2) {
+            throw new IllegalArgumentException(
+                    "Numero de cuenta invalido: " + numero
+            );
+        }
+
+        String prefijo = numero.substring(0, 2);
+
+        return switch (prefijo) {
+            case "22" -> jdbcCuenca;
+            case "17" -> jdbcQuito;
+            default -> throw new IllegalArgumentException(
+                    "Prefijo de oficina no reconocido: " + prefijo
+            );
+        };
+    }
+}
+\end{lstlisting}
+
+\subsubsection{\texttt{BancoController.java}}
+
+En el paquete \texttt{controller}, cree la clase \texttt{BancoController} con este contenido:
+
+\begin{lstlisting}[style=java,caption={\texttt{BancoController.java}}]
+package ec.edu.uteq.bancoaustro.controller;
+
+import java.util.List;
+import java.util.Map;
+
+import ec.edu.uteq.bancoaustro.service.ConsultaDistribuidaService;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/api/banco")
+public class BancoController {
+
+    private final ConsultaDistribuidaService service;
+
+    public BancoController(ConsultaDistribuidaService service) {
+        this.service = service;
+    }
+
+    @GetMapping("/saldo/{numero}")
+    public Map<String, Object> saldo(@PathVariable String numero) {
+        return service.consultarSaldo(numero);
+    }
+
+    @GetMapping("/clientes")
+    public List<Map<String, Object>> clientes() {
+        return service.listarTodosLosClientes();
+    }
+}
+\end{lstlisting}
+
+\subsection{Estructura del proyecto Java en este punto}
+
+\figuraGuia{ilustracion19}{Estructura del proyecto Java actualizado}{0.85}
+
+% ======================================================================
+\section{Ejecutar y probar la aplicación}
+% ======================================================================
+
+\subsection{Levantar la aplicación Spring Boot}
+
+En el panel del proyecto, abra la clase \texttt{BancoAustroApplication.java}. Haga clic en el triángulo verde que aparece a la izquierda del nombre de la clase, o al lado del método \texttt{main}, y elija \emph{Run 'BancoAustroApplication'}. También funciona el atajo \texttt{Shift+F10}. En la parte inferior aparecerá la consola de ejecución con los logs de Spring Boot. Espere a las líneas:
+
+\begin{lstlisting}[style=bash,caption={Confirmación de arranque de la aplicación}]
+Tomcat started on port(s): 8080 (http)
+Started BancoAustroApplication in X.XXX seconds
+\end{lstlisting}
+
+Mientras esa línea no aparezca, la aplicación todavía no está lista para recibir peticiones.
+
+\subsection{Probar los endpoints con Postman}
+
+Una vez ejecutada la aplicación Spring Boot, se realizaron pruebas mediante peticiones \texttt{GET} en Postman para verificar que el sistema consulte correctamente los nodos distribuidos de Cuenca y Quito.
+
+\subsubsection{Primera petición: consultar saldo en el nodo Cuenca}
+
+Se abrió Postman y se seleccionó el método \texttt{GET}. Luego se ingresó la siguiente URL:
+
+\begin{lstlisting}[style=bash,caption={Endpoint de saldo — nodo Cuenca}]
+http://localhost:8080/api/banco/saldo/2201000001
+\end{lstlisting}
+
+La respuesta esperada es un JSON similar al siguiente:
+
+\begin{lstlisting}[style=json,caption={Respuesta esperada — nodo Cuenca}]
+{
+  "numero": "2201000001",
+  "saldo": 15000.00,
+  "oficina": "CUENCA"
+}
+\end{lstlisting}
+
+\figuraGuia{ilustracion20}{Prueba 1 — consulta de saldo en el nodo Cuenca}{0.85}
+
+Esta prueba demuestra que la aplicación identificó el prefijo \texttt{22} del número de cuenta y dirigió la consulta al nodo correspondiente de Cuenca.
+
+\subsubsection{Segunda petición: consultar saldo en el nodo Quito}
+
+Luego se cambió la URL por la siguiente:
+
+\begin{lstlisting}[style=bash,caption={Endpoint de saldo — nodo Quito}]
+http://localhost:8080/api/banco/saldo/1701000001
+\end{lstlisting}
+
+La respuesta esperada es:
+
+\begin{lstlisting}[style=json,caption={Respuesta esperada — nodo Quito}]
+{
+  "numero": "1701000001",
+  "saldo": 8000.00,
+  "oficina": "QUITO"
+}
+\end{lstlisting}
+
+\figuraGuia{ilustracion21}{Prueba 2 — consulta de saldo en el nodo Quito}{0.85}
+
+Esta prueba demuestra que la aplicación identificó el prefijo \texttt{17} y dirigió la consulta al nodo correspondiente de Quito.
+
+\subsubsection{Tercera petición: unión de clientes de ambos nodos}
+
+Finalmente, se probó la consulta que une los datos de los dos nodos mediante la siguiente URL:
+
+\begin{lstlisting}[style=bash,caption={Endpoint de unión de clientes}]
+http://localhost:8080/api/banco/clientes
+\end{lstlisting}
+
+La respuesta debe mostrar un arreglo JSON con seis registros: los tres clientes del nodo Cuenca y los tres clientes del nodo Quito.
+
+\figuraGuia{ilustracion22}{Prueba 3 — unión de clientes de ambos nodos}{0.85}
+
+Esta prueba evidencia la operación de unión sobre los fragmentos distribuidos, permitiendo consultar información de ambos nodos desde una sola aplicación.
+
+% ======================================================================
+\section{Prueba de tolerancia a fallos}
+% ======================================================================
+
+Uno de los cinco requisitos del caso era: \emph{si una oficina se cae, las demás siguen operando}. Se comprueba empíricamente.
+
+\subsection{Detener el nodo Quito}
+
+Con la aplicación Spring Boot todavía corriendo, abra un nuevo \texttt{cmd.exe} y ejecute:
+
+\begin{lstlisting}[style=bash,caption={Detener el contenedor del nodo Quito}]
+docker stop banco-quito
+docker compose ps
+\end{lstlisting}
+
+El listado debe mostrar a \texttt{banco-cuenca} como \emph{running} y a \texttt{banco-quito} como \emph{exited}. En Docker Desktop, el punto verde de Quito pasará a gris.
+
+\subsection{Repetir las pruebas con un nodo caído}
+
+Regrese a Postman y vuelva a lanzar las peticiones:
+
+\begin{itemize}
+    \item \texttt{GET /api/banco/saldo/2201000001} $\rightarrow$ sigue respondiendo correctamente porque la cuenta está en Cuenca, que sigue viva.
+\end{itemize}
+
+\figuraGuia{ilustracion23}{Tolerancia a fallos — la consulta a Cuenca sigue funcionando}{0.85}
+
+\begin{itemize}
+    \item \texttt{GET /api/banco/saldo/1701000001} $\rightarrow$ falla con un error de conexión al puerto 5433. La aplicación no sabe cómo llegar a Quito.
+\end{itemize}
+
+\figuraGuia{ilustracion24}{Tolerancia a fallos — la consulta a Quito falla}{0.85}
+
+\begin{itemize}
+    \item \texttt{GET /api/banco/clientes} $\rightarrow$ falla porque el método actual intenta consultar los dos nodos y no captura el error del nodo caído.
+\end{itemize}
+
+\figuraGuia{ilustracion25}{Tolerancia a fallos — la unión de clientes falla sin manejo de excepciones}{0.85}
+
+Este resultado deja en evidencia que, si bien la fragmentación horizontal permite aislar el impacto de una caída sobre las consultas dirigidas a un único nodo, la operación de \emph{unión} necesita manejo explícito de excepciones para degradar el servicio de forma controlada en lugar de fallar por completo.
+
+% ======================================================================
+\section{Conclusiones}
+% ======================================================================
+
+\begin{itemize}
+    \item La fragmentación horizontal permitió distribuir físicamente los datos del banco en dos nodos PostgreSQL independientes, cada uno responsable únicamente de su oficina.
+    \item El enrutamiento por prefijo de cuenta, implementado en \texttt{ConsultaDistribuidaService}, demostró dirigir correctamente cada consulta al nodo correspondiente.
+    \item La operación de unión sobre ambos nodos funciona correctamente en condiciones normales, pero requiere manejo de excepciones para tolerar la caída parcial del sistema.
+    \item Las pruebas de tolerancia a fallos confirmaron que las consultas dirigidas a un nodo activo no se ven afectadas por la caída de otro nodo, cumpliendo parcialmente con el requisito de disponibilidad del caso de estudio.
+\end{itemize}
+
+\end{document}
