@@ -2,10 +2,11 @@
 
 Repositorio correspondiente a la asignatura **Aplicaciones Distribuidas (ISR-701)**.
 
-Este repositorio contiene dos entregables relacionados con la Unidad de Bases de Datos Distribuidas:
+Este repositorio contiene tres componentes relacionados con la Unidad de Bases de Datos Distribuidas:
 
 1. El informe técnico individual **TA-IND-02**, enfocado en el análisis de consistencia y replicación del PFC **AGLS - TiendaTech**.
 2. La práctica técnica **Banco del Austro**, implementada con Docker, PostgreSQL y Spring Boot.
+3. El informe LaTeX correspondiente a la práctica Banco del Austro.
 
 ---
 
@@ -27,7 +28,10 @@ TA-IND-02-Consistencia-Replicacion-BDD/
 ├── 01-informe-latex-ta-ind-02/
 │   ├── TA-IND-02_Gaibor_AGLS.tex
 │   ├── TA-IND-02_Gaibor_AGLS.pdf
+│   ├── TA-IND-02_Gaibor_AGLS.bbl
 │   ├── referencias.bib
+│   ├── imagenes/
+│   │   └── topologia_actual_tiendatech.png
 │   └── Diagrama/
 │
 ├── 02-practica-banco-austro/
